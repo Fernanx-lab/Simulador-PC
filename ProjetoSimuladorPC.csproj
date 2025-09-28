@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Folder Include="CPU\" />
+    <Folder Include="Barramento\" />
+    <Folder Include="Cache\" />
+    <Folder Include="Interruptor\" />
+    <Folder Include="DMA\" />
+    <Folder Include="MMIO\" />
+    <Folder Include="Utilidades\" />
+    <Folder Include="timer\" />
+    <Folder Include="RAM\" />
+  </ItemGroup>
+
+</Project>
