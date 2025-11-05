@@ -1,4 +1,4 @@
-﻿using System.Net.NetworkInformation;
+﻿/*using System.Net.NetworkInformation;
 using System.Xml;
 
 namespace ProjetoSimuladorPC.Utilidades
@@ -25,4 +25,4 @@ namespace ProjetoSimuladorPC.Utilidades
         // Métricas acumuladas
         public MetricsState Metrics { get; set; } = new MetricsState();
     }
-}
+}*/

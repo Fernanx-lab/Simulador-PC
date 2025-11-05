@@ -1,4 +1,4 @@
-﻿namespace ProjetoSimuladorPC.Utilidades
+﻿/*namespace ProjetoSimuladorPC.Utilidades
 {
     public class Configuracoes
     {
@@ -8,3 +8,4 @@
         public DevicesConfig Devices { get; set; } = new DevicesConfig();
     }
 }
+*/
