@@ -1,5 +1,6 @@
 ﻿/*using System.Net.NetworkInformation;
 using System.Xml;
+using ram;
 
 namespace ProjetoSimuladorPC.Utilidades
 {
