@@ -13,7 +13,6 @@
     <Folder Include="DMA\" />
     <Folder Include="MMIO\" />
     <Folder Include="timer\" />
-    <Folder Include="RAM\" />
   </ItemGroup>
 
 </Project>
