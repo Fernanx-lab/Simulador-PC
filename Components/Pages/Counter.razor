@@ -1,19 +1,107 @@
 ﻿@page "/counter"
 @rendermode InteractiveServer
 
-<PageTitle>Counter</PageTitle>
+<h2>⚙️ Configurações do Hardware</h2>
 
-<h1>Counter</h1>
+<form id="configForm">
+    <fieldset>
+        <legend>Geral</legend>
+        <div>
+            <!-- Substitua <Component /> por um componente válido -->
+            <input type="number" id="clock_hz" @bind="ClockHz" required>
+        </div>
+    </fieldset>
 
-<p role="status">Current count: @currentCount</p>
+    <fieldset>
+        <legend>Cache L1</legend>
+        <div>     
+            <label for="l1_type">Tipo:</label>
+            <select id="l1_type" @bind="L1Type" required>
+                <option value="unified">unified</option>
+                <option value="split">split</option>
+            </select>
+        </div>
+        <div>
+            <label for="l1_size">Tamanho:</label>
+            <input type="text" id="l1_size" @bind="L1Size" required>
+        </div>
+        <div>
+            <label for="l1_assoc">Associatividade:</label>
+            <input type="number" id="l1_assoc" @bind="L1Assoc" required>
+        </div>
+        <div>
+            <label for="l1_line">Tamanho da Linha:</label>
+            <input type="number" id="l1_line" @bind="L1LineSize" required>
+        </div>
+        <div>
+            <label for="l1_hit_cycles">Hit Cycles:</label>
+            <input type="number" id="l1_hit_cycles" @bind="L1HitCycles" required>
+        </div>
+        <div>
+            <label for="l1_miss_cycles">Miss Cycles:</label>
+            <input type="number" id="l1_miss_cycles" @bind="L1MissCycles" required>
+        </div>
+        <div>
+            <label for="l1_write_policy">Write Policy:</label>
+            <select id="l1_write_policy" @bind="L1WritePolicy" required>
+                <option value="WT">WT</option>
+                <option value="WB">WB</option>
+            </select>
+        </div>
+        <div>
+            <label for="l1_write_alloc">Write Alloc:</label>
+            <input type="checkbox" id="l1_write_alloc" @bind="L1WriteAlloc">
+        </div>
+    </fieldset>
 
-<button class="btn btn-primary" @onclick="IncrementCount">Click me</button>
+    <fieldset>
+        <legend>Barramento (Bus)</legend>
+        <div>
+            <label for="bus_width_bytes">Largura (Bytes):</label>
+            <input type="number" id="bus_width_bytes" @bind="BusWidthBytes" required>
+        </div>
+        <div>
+            <label for="bus_wait_states">Wait States:</label>
+            <input type="number" id="bus_wait_states" @bind="BusWaitStates" required>
+        </div>
+        <div>
+            <label for="bus_arbitration">Arbitragem:</label>
+            <select id="bus_arbitration" @bind="BusArbitration" required>
+                <option value="fixed">fixed</option>
+                <option value="round_robin">round_robin</option>
+            </select>
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>Dispositivos (Endereços Base em Hexadecimal)</legend>
+        <p>**Timer** (Base: 0x10000000, Period: <input type="number" id="timer_period_cycles" @bind="TimerPeriodCycles" size="5">)</p>
+        <p>**Console** (Base: 0x10000100)</p>
+        <p>**DMA** (Base: 0x10000200, Burst Len: <input type="number" id="dma_burst_len" @bind="DmaBurstLen" size="5">)</p>
+        <p>**PIC** (Base: 0x10000F00, Prioridades: timer, console)</p>
+    </fieldset>
+
+    <button type="button" id="salvarConfig" @onclick="SalvarConfiguracoes">💾 Salvar Configurações</button>
+</form>
 
 @code {
-    private int currentCount = 0;
+    private int ClockHz { get; set; } = 100000000;
+    private string L1Type { get; set; } = "unified";
+    private string L1Size { get; set; } = "16KB";
+    private int L1Assoc { get; set; } = 2;
+    private int L1LineSize { get; set; } = 64;
+    private int L1HitCycles { get; set; } = 1;
+    private int L1MissCycles { get; set; } = 20;
+    private string L1WritePolicy { get; set; } = "WT";
+    private bool L1WriteAlloc { get; set; } = true;
+    private int BusWidthBytes { get; set; } = 4;
+    private int BusWaitStates { get; set; } = 1;
+    private string BusArbitration { get; set; } = "fixed";
+    private int TimerPeriodCycles { get; set; } = 5000;
+    private int DmaBurstLen { get; set; } = 16;
 
-    private void IncrementCount()
+    private void SalvarConfiguracoes()
     {
-        currentCount++;
+        // Lógica para salvar as configurações
     }
 }
