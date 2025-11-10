@@ -1,54 +1,52 @@
+// Arquivo: RamState.cs
+// Local sugerido na solução: ProjetoSimuladorPC/ram/RamState.cs
+// Este arquivo contém implementações centrais da RAM e tipos auxiliares.
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace SimulacaoMemoria
+// Interfaces compartilhadas do barramento - coloque este bloco em ProjetoSimuladorPC/barramento/IBus.cs se preferir
+namespace ProjetoSimuladorPC.Barramento
 {
-    /*
-     RamState.cs
-     Simulação avançada de RAM com componentes relevantes para integração com CPU, Cache, DMA e dispositivos.
-
-     Objetivos:
-     - representar a RAM física (channels, ranks, banks, rows, cols, row-buffer), com parâmetros de temporização (tRCD, tCL, tRP, tRAS, tRFC)
-     - expor uma interface de barramento (IBus) que CPU/Cache usam para ler/escrever
-     - suportar MMIO (handlers por região) para dispositivos mapeados
-     - fornecer observabilidade (eventos OnRead/OnWrite/OnRefresh/OnRowBufferHit)
-     - proteger acessos com locks (para simular concorrência com DMA etc.)
-     - retornar custo em ciclos (inteiro) para cada operação e oferecer API assíncrona que aguarda o tempo simulado
-     - implementar um controlador de memória simples (MemoryController) que traduz endereços físicos em channel/rank/bank/row/col e aplica timing
-
-     Nota: Esta é uma simulação pedagógica — não modela todos os detalhes de um DRAM real (sem sinais elétricos), mas contém os blocos funcionais necessários para integrar com CPU/Cache e estudar comportamento como hits de row-buffer, latência por open/close de linha, refresh, e MMIO.
-    */
-
-    #region Interfaces públicas
-    // Interface do barramento usado por CPU / Cache / Devices
+    /// <summary>
+    /// Interface do barramento usada por CPU / Cache / Devices para acessar memória.
+    /// Coloque este arquivo em /barramento e importe onde necessário.
+    /// </summary>
     public interface IBus
     {
-        // operações simples - retornam tuples com dados e custo em ciclos
         (byte[] data, int cycles) ReadBytes(ulong physAddr, int len);
         int WriteBytes(ulong physAddr, byte[] data);
 
-        // versões assíncronas que aguardam o tempo simulado
         Task<(byte[] data, int cycles)> ReadBytesAsync(ulong physAddr, int len, CancellationToken ct = default);
         Task<int> WriteBytesAsync(ulong physAddr, byte[] data, CancellationToken ct = default);
     }
 
-    // Interface para dispositivos mapeáveis fisicamente
+    /// <summary>
+    /// Interface opcional para dispositivos mapeáveis (MMIO).
+    /// Dispositivos podem implementar essa interface ou registrar handlers no RamState.
+    /// </summary>
     public interface IMemoryDevice : IBus
     {
         ulong Start { get; }
         ulong Length { get; }
-        bool Contains(ulong addr) => addr >= Start && addr < Start + Length;
     }
-    #endregion
+}
 
-    #region Configurações e enums
+// Implementações da RAM e controlador de memória
+namespace ProjetoSimuladorPC.Ram
+{
+    using ProjetoSimuladorPC.Barramento;
+
     [Flags]
     public enum MemProt { None = 0, Read = 1, Write = 2, Exec = 4 }
 
-    // Parâmetros de temporização (valores em ciclos abstratos)
+    /// <summary>
+    /// Parâmetros de tempo abstratos para a DRAM (em ciclos simulados).
+    /// Coloque configurações reais no construtor do MemoryController.
+    /// </summary>
     public class DramTiming
     {
         public int tCL { get; set; } = 12;   // CAS latency
@@ -58,9 +56,11 @@ namespace SimulacaoMemoria
         public int tRFC { get; set; } = 350; // Refresh cycle time
         public int tBurst { get; set; } = 4; // Burst length in cycles
     }
-    #endregion
 
-    #region Memory layout primitives
+    /// <summary>
+    /// Região mapeada na memória (ex.: CODE, HEAP, STACK, MMIO, RODATA).
+    /// RamState utiliza essas regiões para checagem de permissão antes de delegar ao controlador.
+    /// </summary>
     public class MemoryRegion
     {
         public ulong Start { get; }
@@ -79,14 +79,12 @@ namespace SimulacaoMemoria
 
         public bool Contains(ulong addr) => addr >= Start && addr <= End;
     }
-    #endregion
 
-    #region Low-level DRAM structures
-    // Representa um banco DRAM composto por linhas (rows) cada uma com colunas (cols).
+    // Representa um banco físico de DRAM (rows x cols)
     internal class DramBank
     {
-        private readonly byte[][] rows; // rows[rowIndex][col]
-        public int OpenRow { get; private set; } = -1; // índice da linha atualmente aberta no row-buffer, -1 se nenhuma
+        private readonly byte[][] rows;
+        public int OpenRow { get; private set; } = -1;
         public readonly int RowCount;
         public readonly int ColCount;
 
@@ -100,20 +98,14 @@ namespace SimulacaoMemoria
 
         public bool HasOpenRow => OpenRow >= 0;
 
-        // Abrir uma linha (traz para row-buffer)
         public void ActivateRow(int row)
         {
             if (row < 0 || row >= RowCount) throw new ArgumentOutOfRangeException(nameof(row));
             OpenRow = row;
         }
 
-        // Fechar a linha aberta
-        public void Precharge()
-        {
-            OpenRow = -1;
-        }
+        public void Precharge() => OpenRow = -1;
 
-        // Ler colunas de uma linha já aberta
         public byte[] ReadFromOpenRow(int col, int len)
         {
             if (OpenRow < 0) throw new InvalidOperationException("No open row");
@@ -130,7 +122,6 @@ namespace SimulacaoMemoria
             Buffer.BlockCopy(data, 0, rows[OpenRow], col, data.Length);
         }
 
-        // Leitura direta (sem abrir) - usado para inicialização ou transferências completas
         public byte[] ReadDirect(int row, int col, int len)
         {
             if (row < 0 || row >= RowCount) throw new ArgumentOutOfRangeException(nameof(row));
@@ -139,20 +130,19 @@ namespace SimulacaoMemoria
             return outb;
         }
 
-        // Escrita direta
         public void WriteDirect(int row, int col, byte[] data)
         {
             if (row < 0 || row >= RowCount) throw new ArgumentOutOfRangeException(nameof(row));
             Buffer.BlockCopy(data, 0, rows[row], col, data.Length);
         }
     }
-    #endregion
 
-    #region Memory controller
-    // MemoryController gerencia canais, ranks, banks e aplica timing
+    /// <summary>
+    /// Controlador de memória: traduz endereços físicos em (channel,rank,bank,row,col)
+    /// gerencia row-buffer, timings, MMIO handlers e mantém contador de ciclos.
+    /// </summary>
     public class MemoryController : IBus
     {
-        // organização física configurável
         public readonly int Channels;
         public readonly int RanksPerChannel;
         public readonly int BanksPerRank;
@@ -160,21 +150,16 @@ namespace SimulacaoMemoria
         public readonly int ColsPerRow; // bytes per row
 
         private readonly DramTiming timing;
-        private readonly DramBank[,,,] banks; // [channel, rank, bank, dummyIndex]
-
-        // ciclo simulado global (apenas contador lógico)
+        private readonly DramBank[,,,] banks; // [channel,rank,bank,0]
         private long cycleCounter = 0;
-
-        // lock para concorrência
         private readonly ReaderWriterLockSlim memLock = new ReaderWriterLockSlim();
 
-        // events
-        public event Action<ulong, int> OnRead; // physAddr, len
+        public event Action<ulong, int> OnRead;
         public event Action<ulong, int> OnWrite;
-        public event Action<int, int, int, int> OnRowBufferHit; // channel,rank,bank,row
+        public event Action<int, int, int, int> OnRowBufferHit;
         public event Action OnRefreshStarted;
 
-        // MMIO handlers (delegates)
+        // MMIO handlers: (start,size, readHandler, writeHandler)
         private readonly List<(ulong start, ulong size, Func<ulong, int, (byte[] data, int cycles)> readHandler, Func<ulong, byte[], int> writeHandler)> mmio
             = new List<(ulong, ulong, Func<ulong, int, (byte[], int)>, Func<ulong, byte[], int>)>();
 
@@ -182,7 +167,6 @@ namespace SimulacaoMemoria
         {
             Channels = channels; RanksPerChannel = ranksPerChannel; BanksPerRank = banksPerRank; RowsPerBank = rowsPerBank; ColsPerRow = colsPerRow;
             this.timing = timing ?? new DramTiming();
-            // create banks
             banks = new DramBank[Channels, RanksPerChannel, BanksPerRank, 1];
             for (int ch = 0; ch < Channels; ch++)
                 for (int r = 0; r < RanksPerChannel; r++)
@@ -190,9 +174,6 @@ namespace SimulacaoMemoria
                         banks[ch, r, b, 0] = new DramBank(RowsPerBank, ColsPerRow);
         }
 
-        #region Address decode helpers
-        // Translate physical address into (channel, rank, bank, row, col)
-        // Strategy: low bits -> column, next -> row, next -> bank, rank, channel
         private void DecodeAddress(ulong physAddr, out int channel, out int rank, out int bank, out int row, out int col)
         {
             ulong addr = physAddr;
@@ -206,9 +187,7 @@ namespace SimulacaoMemoria
             addr /= (ulong)RanksPerChannel;
             channel = (int)(addr % (ulong)Channels);
         }
-        #endregion
 
-        #region MMIO registration
         public void RegisterMmioHandler(ulong start, ulong size, Func<ulong, int, (byte[] data, int cycles)> readHandler, Func<ulong, byte[], int> writeHandler)
         {
             mmio.Add((start, size, readHandler, writeHandler));
@@ -219,55 +198,43 @@ namespace SimulacaoMemoria
             var m = mmio.FirstOrDefault(t => addr >= t.start && addr < t.start + t.size);
             return (m.readHandler, m.writeHandler);
         }
-        #endregion
 
-        #region Core access logic (sync and async variants)
-        // Synchronous read: devolve dados e número de ciclos consumidos.
         public (byte[] data, int cycles) ReadBytes(ulong physAddr, int len)
         {
             if (len <= 0) return (Array.Empty<byte>(), 0);
-            memLock.EnterWriteLock(); // write lock to simulate single-port DRAM access
+            memLock.EnterWriteLock();
             try
             {
-                // MMIO first
                 var (mmioRead, mmioWrite) = FindMmio(physAddr);
                 if (mmioRead != null)
                 {
                     var r = mmioRead(physAddr, len);
-                    // update cycle counter with handler cost
                     Interlocked.Add(ref cycleCounter, r.cycles);
                     OnRead?.Invoke(physAddr, len);
                     return (r.data, r.cycles);
                 }
 
-                // decode
                 DecodeAddress(physAddr, out int ch, out int rk, out int bk, out int row, out int col);
                 var bankObj = banks[ch, rk, bk, 0];
-
                 int cycles = 0;
 
-                // if row is open -> row-buffer hit
                 if (bankObj.HasOpenRow && bankObj.OpenRow == row)
                 {
-                    cycles += timing.tCL + timing.tBurst; // CAS latency + burst
+                    cycles += timing.tCL + timing.tBurst;
                     OnRowBufferHit?.Invoke(ch, rk, bk, row);
                 }
                 else
                 {
-                    // if there's an open row, precharge first
                     if (bankObj.HasOpenRow)
                     {
-                        cycles += timing.tRP; // close currently open row
+                        cycles += timing.tRP;
                         bankObj.Precharge();
                     }
-                    // activate desired row
                     cycles += timing.tRCD;
                     bankObj.ActivateRow(row);
-                    // then CAS
                     cycles += timing.tCL + timing.tBurst;
                 }
 
-                // perform read from the open row (may cross cols -> handle chunking)
                 var data = bankObj.ReadFromOpenRow(col, len);
                 Interlocked.Add(ref cycleCounter, cycles);
                 OnRead?.Invoke(physAddr, len);
@@ -276,7 +243,6 @@ namespace SimulacaoMemoria
             finally { memLock.ExitWriteLock(); }
         }
 
-        // Synchronous write: retorna ciclos consumidos
         public int WriteBytes(ulong physAddr, byte[] data)
         {
             if (data == null || data.Length == 0) return 0;
@@ -294,11 +260,10 @@ namespace SimulacaoMemoria
 
                 DecodeAddress(physAddr, out int ch, out int rk, out int bk, out int row, out int col);
                 var bankObj = banks[ch, rk, bk, 0];
-
                 int cycles = 0;
                 if (bankObj.HasOpenRow && bankObj.OpenRow == row)
                 {
-                    cycles += timing.tCL + timing.tBurst; // write also experiences CAS-like latency
+                    cycles += timing.tCL + timing.tBurst;
                     OnRowBufferHit?.Invoke(ch, rk, bk, row);
                 }
                 else
@@ -317,13 +282,11 @@ namespace SimulacaoMemoria
             finally { memLock.ExitWriteLock(); }
         }
 
-        // Async variants: aguarda o número de ciclos (convertendo para ms via scale) e devolve
-        private const double CycleToMs = 0.0005; // escala instrutiva: 1 ciclo = 0.0005 ms (ajustável)
+        private const double CycleToMs = 0.0005;
 
         public async Task<(byte[] data, int cycles)> ReadBytesAsync(ulong physAddr, int len, CancellationToken ct = default)
         {
             var (data, cycles) = ReadBytes(physAddr, len);
-            // simulate timing delay
             int delayMs = (int)Math.Ceiling(cycles * CycleToMs);
             if (delayMs > 0) await Task.Delay(delayMs, ct);
             return (data, cycles);
@@ -336,17 +299,13 @@ namespace SimulacaoMemoria
             if (delayMs > 0) await Task.Delay(delayMs, ct);
             return cycles;
         }
-        #endregion
 
-        #region Refresh (simplified)
-        // Força um refresh completo (consome tRFC cycles)
         public int RefreshAll()
         {
             memLock.EnterWriteLock();
             try
             {
                 OnRefreshStarted?.Invoke();
-                // precharge all banks
                 for (int ch = 0; ch < Channels; ch++)
                     for (int r = 0; r < RanksPerChannel; r++)
                         for (int b = 0; b < BanksPerRank; b++)
@@ -358,28 +317,23 @@ namespace SimulacaoMemoria
             finally { memLock.ExitWriteLock(); }
         }
 
-        // propriedade para ler ciclo atual
         public long CurrentCycle => Interlocked.Read(ref cycleCounter);
-        #endregion
 
-        #region Helper debug
         public string GetTopologyInfo()
         {
             return $"Channels={Channels}, Ranks={RanksPerChannel}, BanksPerRank={BanksPerRank}, RowsPerBank={RowsPerBank}, ColsPerRow={ColsPerRow}";
         }
-        #endregion
     }
-    #endregion
 
-    #region RamState (fachada para integração com sistema)
-    // RamState atua como fachada que gerencia regiões (code/heap/stack/mmio/rodata), proteção de acesso
-    // e delega leituras/escritas para MemoryController quando apropriado.
-    public class RamState
+    /// <summary>
+    /// RamState: fachada que mapeia regiões e valida permissões antes de delegar ao MemoryController.
+    /// Arquivo sugerido: ProjetoSimuladorPC/ram/RamState.cs
+    /// </summary>
+    public class RamState : IBus
     {
         private readonly MemoryController memCtrl;
         private readonly List<MemoryRegion> regions = new List<MemoryRegion>();
 
-        // events relay do controlador
         public event Action<ulong, int> OnRead { add { memCtrl.OnRead += value; } remove { memCtrl.OnRead -= value; } }
         public event Action<ulong, int> OnWrite { add { memCtrl.OnWrite += value; } remove { memCtrl.OnWrite -= value; } }
         public event Action<int, int, int, int> OnRowBufferHit { add { memCtrl.OnRowBufferHit += value; } remove { memCtrl.OnRowBufferHit -= value; } }
@@ -398,10 +352,8 @@ namespace SimulacaoMemoria
             regions.Add(new MemoryRegion(start, size, prot, name));
         }
 
-        // tamanho físico suportado calculado pela configuração do controlador
         public ulong ComputePhysicalSize()
         {
-            // size = channels * ranks * banks * rows * cols
             ulong size = (ulong)memCtrl.Channels * (ulong)memCtrl.RanksPerChannel * (ulong)memCtrl.BanksPerRank * (ulong)memCtrl.RowsPerBank * (ulong)memCtrl.ColsPerRow;
             return size;
         }
@@ -425,7 +377,6 @@ namespace SimulacaoMemoria
             }
         }
 
-        // Registra handlers MMIO no controlador para uma região específica previamente mapeada
         public void RegisterMmioHandlers(ulong start, ulong size, Func<ulong, int, (byte[] data, int cycles)> readHandler, Func<ulong, byte[], int> writeHandler)
         {
             var region = regions.FirstOrDefault(r => r.Start == start && r.Size == size);
@@ -433,7 +384,6 @@ namespace SimulacaoMemoria
             memCtrl.RegisterMmioHandler(start, size, readHandler, writeHandler);
         }
 
-        #region IBus facade
         public (byte[] data, int cycles) ReadBytes(ulong physAddr, int len)
         {
             CheckAccessPerm(physAddr, len, MemProt.Read);
@@ -451,18 +401,18 @@ namespace SimulacaoMemoria
 
         public Task<int> WriteBytesAsync(ulong physAddr, byte[] data, CancellationToken ct = default)
             => memCtrl.WriteBytesAsync(physAddr, data, ct);
-        #endregion
 
-        #region Debug helpers
         public IEnumerable<string> GetRegionsInfo() => regions.OrderBy(r => r.Start).Select(r => $"{r.Name}: 0x{r.Start:X} - 0x{r.End:X} (size=0x{r.Size:X}, prot={r.Prot})");
         public string GetTopologyInfo() => memCtrl.GetTopologyInfo();
         public long CurrentCycle => memCtrl.CurrentCycle;
-        #endregion
     }
-    #endregion
+}
 
-    #region Example simple cache / CPU skeleton (facilitam integração)
-    // Cache muito simplificada que delega para um IBus quando há miss
+// Exemplos minimalistas de Cache e CPU (recomendo mover para /cache e /cpu)
+namespace ProjetoSimuladorPC.Cache
+{
+    using ProjetoSimuladorPC.Barramento;
+
     public class SimpleCache : IBus
     {
         private readonly IBus backend;
@@ -510,8 +460,12 @@ namespace SimulacaoMemoria
         public Task<int> WriteBytesAsync(ulong physAddr, byte[] data, CancellationToken ct = default)
             => Task.FromResult(WriteBytes(physAddr, data));
     }
+}
 
-    // CPU skeleton apenas para demonstrar uso do bus
+namespace ProjetoSimuladorPC.Cpu
+{
+    using ProjetoSimuladorPC.Barramento;
+
     public class CpuSimple
     {
         private readonly IBus bus;
@@ -527,5 +481,4 @@ namespace SimulacaoMemoria
             return bus.WriteBytes(address, data);
         }
     }
-    #endregion
 }
