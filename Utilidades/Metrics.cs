@@ -1,4 +1,3 @@
-ProjetoSimuladorPC/Utilidades/Metrics.cs
 namespace ProjetoSimuladorPC.Utilidades
 {
     /// <summary>

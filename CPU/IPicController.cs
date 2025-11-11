@@ -1,4 +1,3 @@
-ProjetoSimIO.Core/IPicController.cs
 namespace ProjetoSimIO.Core
 {
     /// <summary>

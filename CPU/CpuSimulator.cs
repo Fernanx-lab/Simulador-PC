@@ -29,10 +29,10 @@ namespace ProjetoSimuladorPC.Cpu
         {
             this.ram = ram ?? throw new ArgumentNullException(nameof(ram));
             this.controladorPic = controladorPic ?? throw new ArgumentNullException(nameof(controladorPic));
-            this.metricas = metricas ?? new Metrics();
+            this.metricas = metricas ?? throw new ArgumentNullException(nameof(metricas));
             estado = new CpuState();
-            executor = new InstructionExecutor(ram, estado, metricas);
-            tratadorIrq = new CpuInterruptHandler(controladorPic, estado, metricas);
+            executor = new InstructionExecutor(ram, estado, this.metricas);
+            tratadorIrq = new CpuInterruptHandler(controladorPic, estado, this.metricas);
 
             this.ram.MemoryChanged += Ram_MemoryChanged;
         }
