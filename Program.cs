@@ -1,10 +1,14 @@
 using ProjetoSimuladorPC.Components;
+using ProjetoSimuladorPC.Utilidades;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+
+// Registrar SimulationState como singleton para injeção em componentes Blazor
+builder.Services.AddSingleton<SimulationState>();
 
 var app = builder.Build();
 
