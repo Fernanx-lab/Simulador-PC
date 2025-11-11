@@ -1,8 +1,11 @@
 ﻿@page "/"
+@rendermode InteractiveServer
 @using System.Net.Http.Json
 @using ProjetoSimuladorPC.Utilidades
 @inject SimulationState Simulation
 @inject HttpClient Http
+@inject SimulationEngine Engine
+@implements IDisposable
 
 <PageTitle>Mini Computador — Painel</PageTitle>
 
@@ -10,8 +13,8 @@
     <header class="panel-header">
         <h1>Mini Computador</h1>
         <div class="controls">
-            <button class="btn" @onclick="AdvanceCycleAsync">Avançar ciclo</button>
-            <button class="btn" @onclick="RefreshAsync">Atualizar</button>
+            <button class="btn" @onclick="AdvanceCycleAsync" disabled="@isLoading">Avançar ciclo</button>
+            <button class="btn" @onclick="RefreshAsync" disabled="@isLoading">Atualizar</button>
             <label class="auto">
                 <input type="checkbox" @bind="AutoAdvance" />
                 Auto (interval ms)
@@ -124,6 +127,10 @@
 
     <footer class="panel-footer">
         <small>Apresente com confiança — dados vindos de <code>SimulationState</code>.</small>
+        @if (!string.IsNullOrEmpty(LastError))
+        {
+            <div style="margin-top:8px;color:#ffb3b3;">Erro: @LastError</div>
+        }
     </footer>
 </div>
 
@@ -169,6 +176,9 @@
     int AutoMs = 500;
     System.Threading.Timer? timer;
 
+    string? LastError;
+    bool isLoading = false;
+
     protected override async Task OnInitializedAsync()
     {
         Simulation.StateChanged += OnSimulationChanged;
@@ -192,31 +202,69 @@
 
     async Task RefreshAsync()
     {
+        isLoading = true;
+        LastError = null;
         try
         {
             snapshot = await Http.GetFromJsonAsync<SimulationSnapshot>($"api/simulation/snapshot?ramPreviewAddress=0&ramPreviewLength=32");
             // se o snapshot veio do servidor, mantenha config também pelo HTTP (opcional)
         }
-        catch
+        catch (Exception ex)
         {
             // fallback local: ler diretamente do serviço caso o HTTP falhe
-            snapshot = Simulation.GetSnapshot(0, 32);
-            config = Simulation.Config ?? new Configuracoes();
+            try
+            {
+                snapshot = Simulation.GetSnapshot(0, 32);
+                config = Simulation.Config ?? new Configuracoes();
+            }
+            catch (Exception inner)
+            {
+                LastError = $"Falha ao atualizar: {inner.Message}";
+            }
+            // registra erro visível
+            if (LastError is null)
+            {
+                LastError = $"Falha ao buscar snapshot via HTTP: {ex.Message}";
+            }
+        }
+        finally
+        {
+            isLoading = false;
         }
     }
 
     async Task AdvanceCycleAsync()
     {
+        isLoading = true;
+        LastError = null;
         try
         {
             var response = await Http.PostAsync($"api/simulation/advance?delta=1", null);
             response.EnsureSuccessStatusCode();
             await RefreshAsync();
         }
-        catch
+        catch (Exception ex)
         {
-            Simulation.AdvanceCycle();
-            await RefreshAsync();
+            // Antes: Simulation.AdvanceCycle() fazia só incremento do contador.
+            // Agora usamos o motor (Engine) para executar realmente um ciclo (CPU, Cache, DMA, RAM).
+            try
+            {
+                Engine?.AdvanceOneCycle();
+                await RefreshAsync();
+            }
+            catch (Exception inner)
+            {
+                LastError = $"Falha ao avançar ciclo via Engine: {inner.Message}";
+            }
+
+            if (LastError is null)
+            {
+                LastError = $"Falha HTTP ao avançar ciclo: {ex.Message}";
+            }
+        }
+        finally
+        {
+            isLoading = false;
         }
     }
 
