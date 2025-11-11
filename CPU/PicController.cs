@@ -1,6 +1,3 @@
-ProjetoSimIO.Core/PicController.cs
-using System.Collections.Generic;
-using System.Linq;
 
 namespace ProjetoSimIO.Core
 {

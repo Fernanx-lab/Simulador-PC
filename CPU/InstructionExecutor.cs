@@ -1,5 +1,3 @@
-CPU\InstructionExecutor.cs
-using System;
 using ProjetoSimuladorPC.RAM;
 
 namespace ProjetoSimuladorPC.Cpu
