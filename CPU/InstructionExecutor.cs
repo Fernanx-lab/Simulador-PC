@@ -1,40 +1,70 @@
-ï»¿using ProjetoSimIO.Core;
+CPU\InstructionExecutor.cs
+using System;
+using ProjetoSimuladorPC.RAM;
 
-namespace ProjetoSimIO.Cpu
+namespace ProjetoSimuladorPC.Cpu
 {
     /// <summary>
-    /// ResponsÃ¡vel por simular a execuÃ§Ã£o de instruÃ§Ãµes.
-    /// Pode ser expandido para um conjunto de instruÃ§Ãµes real.
+    /// Executor de instruções que opera diretamente sobre RamState (sem barramento).
+    /// Implementação simples: LOAD/STORE de 4 bytes (uint).
     /// </summary>
     public class InstructionExecutor
     {
-        private readonly IBus bus;
-        private readonly CpuState state;
-        private readonly Metrics metrics;
+        private readonly RamState ram;
+        private readonly CpuState estado;
+        private readonly dynamic metricas;
 
-        public InstructionExecutor(IBus bus, CpuState state, Metrics metrics)
+        public InstructionExecutor(RamState ram, CpuState estado, dynamic metricas)
         {
-            this.bus = bus;
-            this.state = state;
-            this.metrics = metrics;
+            this.ram = ram ?? throw new ArgumentNullException(nameof(ram));
+            this.estado = estado ?? throw new ArgumentNullException(nameof(estado));
+            this.metricas = metricas;
         }
 
         public void ExecuteNextInstruction()
         {
-            // Exemplo bÃ¡sico: LOAD e STORE simulados
-            state.CurrentOperation = "LOAD";
-            uint addr = state.ProgramCounter;
-            uint data = bus.Read32(addr);
-            state.LastAccessAddress = addr;
-            state.LastReadData = data;
-            state.Accumulator = data;
+            // Exemplo: carregar 4 bytes do endereço do PC e armazenar em um MMIO exemplo.
+            estado.OperacaoAtual = "LOAD";
+            int endereco = estado.ContadorPrograma;
 
-            state.CurrentOperation = "STORE";
-            bus.Write32(0x10000100, state.Accumulator);
-            state.LastWriteData = state.Accumulator;
+            byte[] dadosLidos;
+            try
+            {
+                dadosLidos = ram.Ler(endereco, 4);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                // Em caso de acesso inválido, marque operação e retorne
+                estado.OperacaoAtual = "FAULT";
+                return;
+            }
 
-            state.ProgramCounter += 4;
-            metrics.InstructionsExecuted++;
+            uint valor = BitConverter.ToUInt32(dadosLidos, 0);
+            estado.UltimoEnderecoAcesso = endereco;
+            estado.UltimoDadoLido = valor;
+            estado.Acumulador = valor;
+
+            // STORE de exemplo: escreve acumulador em endereço fixo 0x100 (exemplo)
+            estado.OperacaoAtual = "STORE";
+            byte[] bytesEscrita = BitConverter.GetBytes(estado.Acumulador);
+            try
+            {
+                ram.Escrever(0x100, bytesEscrita); // usa int
+                estado.UltimoDadoEscrito = estado.Acumulador;
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                estado.OperacaoAtual = "FAULT";
+                return;
+            }
+
+            estado.ContadorPrograma += 4;
+
+            if (metricas != null)
+            {
+                try { metricas.InstructionsExecuted++; }
+                catch { }
+            }
         }
     }
 }
