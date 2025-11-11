@@ -1,15 +1,16 @@
-CPU\CpuSimulator.cs
 using System;
 using ProjetoSimuladorPC.RAM;
 using ProjetoSimIO.Core;
+using ProjetoSimuladorPC.Cpu;
+using ProjetoSimuladorPC.Utilidades;
 
-namespace ProjetoSimuladorPC.CPU
+namespace ProjetoSimuladorPC.Cpu
 {
     /// <summary>
     /// Simulador de CPU que acessa RamState diretamente (sem IBus).
-    /// Inscreve-se em MemoryChanged para reagir a alterações se necessário.
+    /// Agora usa CpuInterruptHandler para tratar IRQs e não implementa mais ICpu.
     /// </summary>
-    public class CpuSimulator : ICpu
+    public class CpuSimulator
     {
         public string Name => "CPU0";
         public int Priority => 0;
@@ -17,31 +18,29 @@ namespace ProjetoSimuladorPC.CPU
 
         private readonly RamState ram;
         private readonly IPicController controladorPic;
-        private readonly dynamic metricas;
+        private readonly Metrics metricas;
         private readonly CpuState estado;
         private readonly InstructionExecutor executor;
+        private readonly CpuInterruptHandler tratadorIrq;
 
         private ulong contadorCiclos = 0;
 
-        public CpuSimulator(RamState ram, IPicController controladorPic, dynamic metricas)
+        public CpuSimulator(RamState ram, IPicController controladorPic, Metrics metricas)
         {
             this.ram = ram ?? throw new ArgumentNullException(nameof(ram));
             this.controladorPic = controladorPic ?? throw new ArgumentNullException(nameof(controladorPic));
-            this.metricas = metricas;
+            this.metricas = metricas ?? new Metrics();
             estado = new CpuState();
             executor = new InstructionExecutor(ram, estado, metricas);
+            tratadorIrq = new CpuInterruptHandler(controladorPic, estado, metricas);
 
             this.ram.MemoryChanged += Ram_MemoryChanged;
         }
 
         private void Ram_MemoryChanged(object? sender, MemoryChangedEventArgs e)
         {
-            // Exemplo de reação a mudanças na RAM: atualizar métricas ou invalidar caches locais.
-            if (metricas != null)
-            {
-                try { metricas.MemoryWrites++; }
-                catch { }
-            }
+            // Reação a mudanças na RAM: atualizar métricas ou invalidar caches locais.
+            try { metricas.MemoryWrites++; } catch { }
         }
 
         public void StepInstruction() => executor.ExecuteNextInstruction();
@@ -55,8 +54,12 @@ namespace ProjetoSimuladorPC.CPU
             if (IrqPending() && estado.InterrupcaoHabilitada)
             {
                 int vetor = controladorPic.GetPendingVector();
-                HandleInterrupt(vetor);
-                AckIrq(vetor);
+                if (vetor >= 0)
+                {
+                    // Delega o tratamento ao handler desacoplado.
+                    tratadorIrq.HandleInterrupt(vetor);
+                    // Nota: tratador realiza o ACK ao PIC.
+                }
             }
 
             if (!estado.Parado)
@@ -66,11 +69,7 @@ namespace ProjetoSimuladorPC.CPU
             catch { }
         }
 
-        private void HandleInterrupt(int vetor)
-        {
-            // Tratamento simples: atualiza PC para vetor * 4 (exemplo)
-            estado.ContadorPrograma = vetor * 4;
-            try { metricas.InterruptsHandled++; } catch { }
-        }
+        // Exponha retorno do ISR se outro código precisar invocá-lo
+        public void ReturnFromInterrupt() => tratadorIrq.ReturnFromInterrupt();
     }
 }
