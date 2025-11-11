@@ -1,9 +1,10 @@
-
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.36119.2 d17.14
+VisualStudioVersion = 17.14.36119.2
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProjetoSimuladorPC", "ProjetoSimuladorPC.csproj", "{106832A2-0A31-45B2-9840-78C695C177D9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimuladorPC_UI", "..\SimuladorPC_UI\SimuladorPC_UI.csproj", "{69609BA4-BC0C-4205-AF94-80DA00D9B732}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -15,6 +16,10 @@ Global
 		{106832A2-0A31-45B2-9840-78C695C177D9}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{106832A2-0A31-45B2-9840-78C695C177D9}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{106832A2-0A31-45B2-9840-78C695C177D9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{69609BA4-BC0C-4205-AF94-80DA00D9B732}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{69609BA4-BC0C-4205-AF94-80DA00D9B732}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{69609BA4-BC0C-4205-AF94-80DA00D9B732}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{69609BA4-BC0C-4205-AF94-80DA00D9B732}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -23,4 +28,3 @@ Global
 		SolutionGuid = {12FD3E60-30A0-4418-BCFC-EEFF5EAFA1DC}
 	EndGlobalSection
 EndGlobal
-
