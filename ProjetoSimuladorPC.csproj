@@ -9,9 +9,7 @@
   <ItemGroup>
     <Folder Include="Barramento\" />
     <Folder Include="Interruptor\" />
-    <Folder Include="DMA\" />
     <Folder Include="MMIO\" />
-    <Folder Include="UI\" />
     <Folder Include="timer\" />
   </ItemGroup>
 

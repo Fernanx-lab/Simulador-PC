@@ -1,121 +1,79 @@
-using System;
 using System.Threading.Tasks;
+using ProjetoSimuladorPC.RAM;
 
 namespace ProjetoSimuladorPC.DMA
 {
-    // ===================================================
-    // INTERFACE DA RAM (deve permanecer porque outro dev fará a RAM real)
-    // ===================================================
-    public interface IMemoriaRAM
-    {
-        byte Ler(int endereco);
-        void Escrever(int endereco, byte valor);
-    }
-
-    // ===================================================
-    // IMPLEMENTAÇÃO DA MMIO
-    // ===================================================
-    public class DispositivoMMIO
-    {
-        private readonly int inicioFaixa;
-        private readonly int fimFaixa;
-        private readonly byte[] buffer;
-        private int pos = 0;
-
-        public DispositivoMMIO(int inicio, int fim)
-        {
-            inicioFaixa = inicio;
-            fimFaixa = fim;
-            buffer = new byte[(fim - inicio) + 1];
-        }
-
-        /// <summary>
-        /// Retorna true se o endereço está dentro da faixa do MMIO.
-        /// </summary>
-        public bool EstaNaFaixa(int endereco)
-        {
-            return endereco >= inicioFaixa && endereco <= fimFaixa;
-        }
-
-        /// <summary>
-        /// Recebe e armazena um dado no registrador interno do MMIO.
-        /// </summary>
-        public void ReceberDado(byte valor)
-        {
-            Console.WriteLine($"[MMIO] Recebeu valor: {valor}");
-
-            // Evita overflow do buffer
-            if (pos >= buffer.Length)
-                pos = 0;
-
-            buffer[pos] = valor;
-            Console.WriteLine($"[MMIO] Registrador {pos} armazenou valor: {valor}");
-
-            pos++;
-        }
-    }
-
-    // ===================================================
-    // CLASSE DMA (usando RAM + MMIO)
-    // ===================================================
+    /// <summary>
+    /// DMA que opera diretamente sobre a fachada concreta RamState e preenche a fachada DmaState.
+    /// Não faz I/O (Console) e não usa interfaces de memória que força injeção de dependência.
+    /// </summary>
     public class DMA
     {
-        private readonly IMemoriaRAM memoria;
-        private readonly DispositivoMMIO dispositivo;
+        private readonly RamState _ram;
+        private readonly DispositivoMMIO _dispositivo;
+        private readonly DmaState _state;
 
-        public bool EmExecucao { get; private set; }
-        public bool TransferenciaConcluida { get; private set; }
+        private readonly object _sync = new();
 
-        /// <summary>
-        /// Construtor: recebe a RAM (interface) e o MMIO
-        /// </summary>
-        public DMA(IMemoriaRAM mem, DispositivoMMIO disp)
+        public DMA(RamState ram, DispositivoMMIO dispositivo, DmaState state)
         {
-            memoria = mem;
-            dispositivo = disp;
-            EmExecucao = false;
-            TransferenciaConcluida = false;
+            _ram = ram;
+            _dispositivo = dispositivo;
+            _state = state;
         }
 
         /// <summary>
-        /// Realiza a transferência direta entre RAM e MMIO.
+        /// Inicia a transferência DMA de forma assíncrona. Retorna uma Task que completa quando a transferência termina.
         /// </summary>
-        public async void ExecutarTransferencia(int origem, int destino, int tamanho)
+        public async Task ExecutarTransferenciaAsync(int origem, int destino, int tamanho, int delayMs = 10)
         {
-            if (EmExecucao)
+            lock (_sync)
             {
-                Console.WriteLine("[DMA] Já existe uma transferência em andamento!");
-                return;
+                if (_state.EmExecucao)
+                {
+                    _state.Fail("Já existe uma transferência em andamento");
+                    return;
+                }
+                _state.Start(origem, destino, tamanho);
             }
 
-            EmExecucao = true;
-            TransferenciaConcluida = false;
-
-            Console.WriteLine($"[DMA] Iniciando transferência de {tamanho} bytes de {origem} -> {destino}");
-
-            await Task.Run(() =>
+            int transferidos = 0;
+            try
             {
                 for (int i = 0; i < tamanho; i++)
                 {
-                    byte dado = memoria.Ler(origem + i);
+                    // Ler 1 byte da RAM (pode lançar se fora dos limites)
+                    byte dado = _ram.Ler(origem + i);
 
-                    if (dispositivo.EstaNaFaixa(destino + i))
+                    // Se destino for MMIO -> enviar ao dispositivo, caso contrário escrever na RAM
+                    if (_dispositivo.EstaNaFaixa(destino + i))
                     {
-                        dispositivo.ReceberDado(dado);
+                        _dispositivo.ReceberDado(dado);
                     }
                     else
                     {
-                        memoria.Escrever(destino + i, dado);
+                        _ram.Escrever(destino + i, dado);
                     }
 
-                    Task.Delay(10).Wait(); // Simula tempo de hardware
+                    transferidos = i + 1;
+                    // Atualiza progresso ocasionalmente (cada byte aqui; UI decide frequência)
+                    _state.ReportProgress(transferidos);
+
+                    // Simula tempo de hardware de forma assíncrona
+                    await Task.Delay(delayMs).ConfigureAwait(false);
                 }
-            });
 
-            EmExecucao = false;
-            TransferenciaConcluida = true;
-
-            Console.WriteLine("[DMA] Transferência finalizada.");
+                _state.Complete();
+            }
+            catch (System.Exception ex)
+            {
+                _state.Fail($"Falha na transferência: {ex.Message}");
+            }
         }
+
+        /// <summary>
+        /// Fornece snapshot do estado DMA (conveniente para a UI).
+        /// </summary>
+        public DmaSnapshot GetStateSnapshot() => _state.GetSnapshot();
     }
 }
