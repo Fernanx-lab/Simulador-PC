@@ -1,6 +1,8 @@
 ﻿@page "/"
+@using System.Net.Http.Json
 @using ProjetoSimuladorPC.Utilidades
 @inject SimulationState Simulation
+@inject HttpClient Http
 
 <PageTitle>Mini Computador — Painel</PageTitle>
 
@@ -8,8 +10,8 @@
     <header class="panel-header">
         <h1>Mini Computador</h1>
         <div class="controls">
-            <button class="btn" @onclick="() => Simulation.AdvanceCycle()">Avançar ciclo</button>
-            <button class="btn" @onclick="Refresh">Atualizar</button>
+            <button class="btn" @onclick="AdvanceCycleAsync">Avançar ciclo</button>
+            <button class="btn" @onclick="RefreshAsync">Atualizar</button>
             <label class="auto">
                 <input type="checkbox" @bind="AutoAdvance" />
                 Auto (interval ms)
@@ -146,27 +148,52 @@
     int AutoMs = 500;
     System.Threading.Timer? timer;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
-        base.OnInitialized();
         Simulation.StateChanged += OnSimulationChanged;
-        snapshot = Simulation.GetSnapshot(0, 32);
+        await RefreshAsync();
         if (AutoAdvance) StartTimer();
     }
 
     void OnSimulationChanged(object? s, EventArgs e)
     {
         // atualiza snapshot reativamente
-        InvokeAsync(() =>
+        InvokeAsync(async () =>
         {
-            snapshot = Simulation.GetSnapshot(0, 32);
+            await RefreshAsync();
             StateHasChanged();
         });
     }
 
-    void Refresh()
+    async Task RefreshAsync()
     {
-        snapshot = Simulation.GetSnapshot(0, 32);
+        try
+        {
+            snapshot = await Http.GetFromJsonAsync<SimulationSnapshot>($"api/simulation/snapshot?ramPreviewAddress=0&ramPreviewLength=32");
+        }
+        catch
+        {
+            // fallback local: ler diretamente do serviço caso o HTTP falhe
+            snapshot = Simulation.GetSnapshot(0, 32);
+        }
+    }
+
+    async Task AdvanceCycleAsync()
+    {
+        try
+        {
+            // chama endpoint que avança o clock; o SimulationState do servidor notificará os componentes via event
+            var response = await Http.PostAsync($"api/simulation/advance?delta=1", null);
+            response.EnsureSuccessStatusCode();
+            // opcional: atualizar imediatamente
+            await RefreshAsync();
+        }
+        catch
+        {
+            // fallback local
+            Simulation.AdvanceCycle();
+            await RefreshAsync();
+        }
     }
 
     void StartTimer()
@@ -174,8 +201,7 @@
         timer?.Dispose();
         timer = new System.Threading.Timer(async _ =>
         {
-            // roda no contexto do servidor e garante chamada segura
-            await InvokeAsync(() => Simulation.AdvanceCycle());
+            await InvokeAsync(async () => await AdvanceCycleAsync());
         }, null, 0, Math.Max(50, AutoMs));
     }
 
