@@ -1,58 +1,76 @@
-Ôªøusing ProjetoSimIO.Core;
+CPU\CpuSimulator.cs
+using System;
+using ProjetoSimuladorPC.RAM;
+using ProjetoSimIO.Core;
 
-namespace ProjetoSimIO.Cpu
+namespace ProjetoSimuladorPC.CPU
 {
     /// <summary>
-    /// Classe principal da CPU simulada.
-    /// Controla execu√ß√£o, interrup√ß√µes e integra√ß√£o com o barramento.
+    /// Simulador de CPU que acessa RamState diretamente (sem IBus).
+    /// Inscreve-se em MemoryChanged para reagir a alteraÁıes se necess·rio.
     /// </summary>
     public class CpuSimulator : ICpu
     {
         public string Name => "CPU0";
         public int Priority => 0;
-        public bool WantsBus => pendingAccess;
+        public bool WantsBus => false; // sem barramento
 
-        private readonly IBus bus;
-        private readonly IPicController pic;
-        private readonly Metrics metrics;
-        private readonly CpuState state;
+        private readonly RamState ram;
+        private readonly IPicController controladorPic;
+        private readonly dynamic metricas;
+        private readonly CpuState estado;
         private readonly InstructionExecutor executor;
-        private readonly CpuInterruptHandler irqHandler;
 
-        private bool pendingAccess = false;
-        private ulong cycleCount = 0;
+        private ulong contadorCiclos = 0;
 
-        public CpuSimulator(IBus bus, IPicController pic, Metrics metrics)
+        public CpuSimulator(RamState ram, IPicController controladorPic, dynamic metricas)
         {
-            this.bus = bus;
-            this.pic = pic;
-            this.metrics = metrics;
-            this.state = new CpuState();
-            this.executor = new InstructionExecutor(bus, state, metrics);
-            this.irqHandler = new CpuInterruptHandler(pic, state, metrics);
+            this.ram = ram ?? throw new ArgumentNullException(nameof(ram));
+            this.controladorPic = controladorPic ?? throw new ArgumentNullException(nameof(controladorPic));
+            this.metricas = metricas;
+            estado = new CpuState();
+            executor = new InstructionExecutor(ram, estado, metricas);
+
+            this.ram.MemoryChanged += Ram_MemoryChanged;
+        }
+
+        private void Ram_MemoryChanged(object? sender, MemoryChangedEventArgs e)
+        {
+            // Exemplo de reaÁ„o a mudanÁas na RAM: atualizar mÈtricas ou invalidar caches locais.
+            if (metricas != null)
+            {
+                try { metricas.MemoryWrites++; }
+                catch { }
+            }
         }
 
         public void StepInstruction() => executor.ExecuteNextInstruction();
-        public bool IrqPending() => pic.HasPendingIrq();
-        public void AckIrq(int vector) => pic.AckIrq(vector);
+        public bool IrqPending() => controladorPic.HasPendingIrq();
+        public void AckIrq(int vector) => controladorPic.AckIrq(vector);
 
         public void Tick()
         {
-            cycleCount++;
+            contadorCiclos++;
 
-            if (IrqPending() && state.InterruptEnabled)
+            if (IrqPending() && estado.InterrupcaoHabilitada)
             {
-                int vector = pic.GetPendingVector();
-                irqHandler.HandleInterrupt(vector);
-                AckIrq(vector);
+                int vetor = controladorPic.GetPendingVector();
+                HandleInterrupt(vetor);
+                AckIrq(vetor);
             }
 
-            if (!state.Halted)
+            if (!estado.Parado)
                 StepInstruction();
 
-            metrics.TotalCycles = (long)cycleCount;
+            try { metricas.TotalCycles = (long)contadorCiclos; }
+            catch { }
         }
 
-        public void OnBusGranted() => pendingAccess = false;
+        private void HandleInterrupt(int vetor)
+        {
+            // Tratamento simples: atualiza PC para vetor * 4 (exemplo)
+            estado.ContadorPrograma = vetor * 4;
+            try { metricas.InterruptsHandled++; } catch { }
+        }
     }
 }
