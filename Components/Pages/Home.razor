@@ -1,126 +1,222 @@
 ﻿@page "/"
+@using ProjetoSimuladorPC.Utilidades
+@inject SimulationState Simulation
 
-<PageTitle>Mini Computador</PageTitle>
+<PageTitle>Mini Computador — Painel</PageTitle>
 
-<div id="computer">
-    <!-- Componentes -->
-    <div class="component" id="cpu">
-        <h3>CPU</h3>
-        <div class="info">
-            Registro A: 0<br />
-            Registro B: 0
+<div class="panel">
+    <header class="panel-header">
+        <h1>Mini Computador</h1>
+        <div class="controls">
+            <button class="btn" @onclick="() => Simulation.AdvanceCycle()">Avançar ciclo</button>
+            <button class="btn" @onclick="Refresh">Atualizar</button>
+            <label class="auto">
+                <input type="checkbox" @bind="AutoAdvance" />
+                Auto (interval ms)
+            </label>
+            <input type="number" class="small" @bind="AutoMs" min="50" />
         </div>
-    </div>
+    </header>
 
-    <div class="component" id="cache">
-        <h3>Cache</h3>
-        <div class="info">
-            Hits: 0<br />
-            Misses: 0
-        </div>
-    </div>
+    <section class="status-bar">
+        <div>Ciclo: <strong>@snapshot?.CicloAtual</strong></div>
+        <div>Timestamp: <strong>@(snapshot?.TimestampUtc.ToLocalTime().ToString("HH:mm:ss.fff") ?? "-")</strong></div>
+        <div>Clock: <strong>@Simulation.Config.ClockHz</strong> Hz</div>
+    </section>
 
-    <div class="component" id="memory">
-        <h3>Memória</h3>
-        <div class="info">
-            Endereço: 0<br />
-            Valor: 0
-        </div>
-    </div>
+    <main class="grid">
+        <article class="card cpu">
+            <h2>CPU</h2>
+            @if (snapshot is not null)
+            {
+                <dl>
+                    <dt>PC</dt><dd>@snapshot.Cpu.ContadorPrograma</dd>
+                    <dt>Accum</dt><dd>@snapshot.Cpu.Acumulador</dd>
+                    <dt>Operação</dt><dd>@snapshot.Cpu.OperacaoAtual</dd>
+                    <dt>Último acesso</dt><dd>@snapshot.Cpu.UltimoEnderecoAcesso</dd>
+                    <dt>Interrupções</dt><dd>@(snapshot.Cpu.InterrupcaoHabilitada ? "ativada" : "desativada")</dd>
+                    <dt>Parado</dt><dd>@(snapshot.Cpu.Parado ? "sim" : "não")</dd>
+                </dl>
+            }
+            else
+            {
+                <p>Carregando...</p>
+            }
+        </article>
 
-    <div class="component" id="bus">
-        <h3>Bus</h3>
-        <div class="info">
-            Status: idle
-        </div>
-    </div>
+        <article class="card cache">
+            <h2>Cache</h2>
+            @if (snapshot is not null)
+            {
+                <div class="metrics">
+                    <div>Leituras: <strong>@snapshot.Cache.Reads</strong></div>
+                    <div>Escritas: <strong>@snapshot.Cache.Writes</strong></div>
+                    <div>Hits: <strong>@snapshot.Cache.Hits</strong></div>
+                    <div>Misses: <strong>@snapshot.Cache.Misses</strong></div>
+                </div>
+                <div class="rates">
+                    <div>Hit rate: <strong>@(snapshot.Cache.HitRate.ToString("P2"))</strong></div>
+                    <div>Miss rate: <strong>@(snapshot.Cache.MissRate.ToString("P2"))</strong></div>
+                </div>
+                <div class="meta">
+                    <small>@snapshot.Cache.CacheSizeBytes bytes · linha @snapshot.Cache.BlockSizeBytes · assoc. @snapshot.Cache.Associativity</small>
+                </div>
+            }
+        </article>
 
-    <!-- Fios (SVG Curvos) -->
-    <svg>
-        <!-- CPU → Cache -->
-        <path d="M50% 200 Q 40% 240, 25% 300" />
-        <!-- CPU → Memória -->
-        <path d="M50% 200 Q 60% 240, 75% 300" />
-        <!-- Cache → Bus -->
-        <path d="M25% 420 Q 37% 460, 50% 500" />
-        <!-- Memória → Bus -->
-        <path d="M75% 420 Q 63% 460, 50% 500" />
-    </svg>
+        <article class="card ram">
+            <h2>Memória (preview)</h2>
+            @if (snapshot is not null)
+            {
+                <div class="ram-info">
+                    <div>Tamanho: <strong>@snapshot.Ram.TamanhoEmBytes</strong> bytes (@snapshot.Ram.TamanhoEmMB MB)</div>
+                    <div>Preview em @snapshot.Ram.PreviewAddress (disponível: @snapshot.Ram.PreviewAvailable)</div>
+                </div>
+
+                <pre class="hex">
+@foreach (var line in GetRamLines(snapshot.Ram.Preview, snapshot.Ram.PreviewAddress, 16))
+{
+    @line
+}
+                </pre>
+            }
+        </article>
+
+        <article class="card dma">
+            <h2>DMA</h2>
+            @if (snapshot is not null)
+            {
+                <div>Origem: <strong>@snapshot.Dma.Origem</strong></div>
+                <div>Destino: <strong>@snapshot.Dma.Destino</strong></div>
+                <div>Tamanho: <strong>@snapshot.Dma.Tamanho</strong></div>
+                <div>Progresso: <strong>@snapshot.Dma.BytesTransferidos</strong> / @snapshot.Dma.Tamanho</div>
+
+                <div class="progress">
+                    <div class="bar" style="width:@(snapshot.Dma.Tamanho > 0 ? (snapshot.Dma.BytesTransferidos * 100.0 / snapshot.Dma.Tamanho) : 0)%"></div>
+                </div>
+
+                <div class="dma-msg">@snapshot.Dma.Mensagem</div>
+            }
+        </article>
+    </main>
+
+    <footer class="panel-footer">
+        <small>Apresente com confiança — dados vindos de <code>SimulationState</code>.</small>
+    </footer>
 </div>
 
-@* Estilo inline (funciona dentro do Razor) *@
 <style>
-    body {
-        margin: 0;
-        padding: 0;
-        height: 100vh;
-        background-color: #111;
-        background-image:
-            linear-gradient(#333 1px, transparent 1px),
-            linear-gradient(90deg, #333 1px, transparent 1px);
-        background-size: 40px 40px;
-        font-family: monospace;
-        color: #0f0;
-        overflow: hidden;
-    }
-
-    #computer {
-        position: relative;
-        width: 100%;
+    .panel {
+        font-family: ui-monospace, Menlo, "Courier New", monospace;
+        color: #e6fff2;
+        background: linear-gradient(180deg, #071014 0%, #071018 100%);
+        padding: 18px;
         height: 100%;
     }
 
-    .component {
-        position: absolute;
-        width: 150px;
-        height: 120px;
-        border-radius: 8px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        text-align: center;
-        padding: 10px;
-        box-shadow: 0 0 10px rgba(0,255,0,0.4);
-        z-index: 10;
-        transition: transform 0.3s;
-    }
+    .panel-header { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+    .panel-header h1 { margin:0; font-size:22px; color:#7ef3b7; }
+    .controls { display:flex; gap:8px; align-items:center; }
+    .btn { background:#143; color:#cffeeb; border:0; padding:6px 10px; border-radius:6px; cursor:pointer; }
+    .small { width:80px; padding:4px; border-radius:4px; }
 
-    .component:hover {
-        transform: scale(1.05);
-    }
+    .status-bar { display:flex; gap:20px; margin-top:12px; color:#9be7c4; }
 
-    #cpu { background-color: #1a1aff; border: 2px solid #1a1aff; top: 80px; left: 50%; transform: translateX(-50%); }
-    #cache { background-color: #ff1a1a; border: 2px solid #ff1a1a; top: 300px; left: 25%; }
-    #memory { background-color: #1aff1a; border: 2px solid #1aff1a; top: 300px; left: 75%; transform: translateX(-100%); }
-    #bus { background-color: #ffaa00; border: 2px solid #ffaa00; top: 500px; left: 50%; transform: translateX(-50%); }
+    .grid { display:grid; grid-template-columns: repeat(2, 1fr); gap:12px; margin-top:16px; }
+    .card { background: rgba(255,255,255,0.02); padding:12px; border-radius:8px; min-height:140px; box-shadow: 0 6px 18px rgba(0,0,0,0.5); }
+    .card h2 { margin-top:0; color:#9df6c8; }
 
-    .component h3 {
-        margin: 0;
-        margin-bottom: 5px;
-        font-size: 16px;
-    }
+    .metrics { display:flex; gap:8px; flex-wrap:wrap; }
+    .rates { margin-top:8px; color:#cdefd6; }
+    .meta { margin-top:8px; color:#9aaea0; font-size:12px; }
 
-    .info {
-        font-size: 12px;
-        line-height: 1.2em;
-    }
+    .ram-info { margin-bottom:8px; color:#d9f3e1; }
+    pre.hex { background:#021314; color:#9ff5d1; padding:8px; border-radius:6px; overflow:auto; max-height:200px; }
 
-    svg {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        z-index: 1;
-    }
+    .progress { background:#00332b; height:14px; border-radius:8px; margin:8px 0; overflow:hidden; }
+    .bar { height:100%; background:linear-gradient(90deg,#57e6a1,#008f66); width:0%; transition:width .3s ease; }
 
-    path {
-        fill: none;
-        stroke: #0f0;
-        stroke-width: 3;
-        filter: drop-shadow(0 0 4px #0f0);
-        stroke-dasharray: 8;
-        animation: pulse 2s linear infinite;
-    }
+    .dma-msg { font-size:12px; color:#bfead0; margin-top:6px; }
+
+    footer.panel-footer { margin-top:12px; color:#7ea38f; }
 </style>
+
+@code {
+    SimulationSnapshot? snapshot;
+    int AutoMs = 500;
+    System.Threading.Timer? timer;
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        Simulation.StateChanged += OnSimulationChanged;
+        snapshot = Simulation.GetSnapshot(0, 32);
+        if (AutoAdvance) StartTimer();
+    }
+
+    void OnSimulationChanged(object? s, EventArgs e)
+    {
+        // atualiza snapshot reativamente
+        InvokeAsync(() =>
+        {
+            snapshot = Simulation.GetSnapshot(0, 32);
+            StateHasChanged();
+        });
+    }
+
+    void Refresh()
+    {
+        snapshot = Simulation.GetSnapshot(0, 32);
+    }
+
+    void StartTimer()
+    {
+        timer?.Dispose();
+        timer = new System.Threading.Timer(async _ =>
+        {
+            // roda no contexto do servidor e garante chamada segura
+            await InvokeAsync(() => Simulation.AdvanceCycle());
+        }, null, 0, Math.Max(50, AutoMs));
+    }
+
+    void StopTimer()
+    {
+        timer?.Dispose();
+        timer = null;
+    }
+
+    IEnumerable<string> GetRamLines(byte[] data, int baseAddr, int cols)
+    {
+        if (data == null || data.Length == 0)
+        {
+            yield return "(sem preview)";
+            yield break;
+        }
+
+        for (int i = 0; i < data.Length; i += cols)
+        {
+            var slice = data.Skip(i).Take(cols).ToArray();
+            var addr = baseAddr + i;
+            var hex = string.Join(" ", slice.Select(b => b.ToString("X2")));
+            yield return $"{addr:X8}: {hex}";
+        }
+    }
+
+    public void Dispose()
+    {
+        Simulation.StateChanged -= OnSimulationChanged;
+        timer?.Dispose();
+    }
+
+    // bind watcher for checkbox
+    private bool _autoAdvance;
+    private bool AutoAdvance
+    {
+        get => _autoAdvance;
+        set
+        {
+            _autoAdvance = value;
+            if (_autoAdvance) StartTimer(); else StopTimer();
+        }
+    }
+}
