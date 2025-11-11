@@ -1,7 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using ProjetoSimuladorPC.Cache;
+﻿using ProjetoSimuladorPC.Cache;
 using ProjetoSimuladorPC.Cpu;
+using ProjetoSimuladorPC.DMA;
 using ProjetoSimuladorPC.RAM;
 
 namespace ProjetoSimuladorPC.Utilidades
@@ -15,7 +14,7 @@ namespace ProjetoSimuladorPC.Utilidades
         private readonly object _sync = new();
 
         // Configurações fixas (YAML)
-        //public Configuracoes Config { get; set; } = new Configuracoes();
+        public Configuracoes Config { get; set; } = new Configuracoes();
 
         // Controle do clock
         public long CicloAtual { get; set; } = 0;
@@ -25,8 +24,6 @@ namespace ProjetoSimuladorPC.Utilidades
         public CacheState Cache { get; set; } = new CacheState();
         public RamState Ram { get; set; } = new RamState(1); // default 1MB — sobrescreva conforme necessário
         public DmaState Dma { get; set; } = new DmaState();
-
-        // Métricas acumuladas
 
         // Evento para notificar UI sobre mudança no estado (ex.: Blazor components podem assinar)
         public event EventHandler? StateChanged;
@@ -122,10 +119,8 @@ namespace ProjetoSimuladorPC.Utilidades
                     PreviewAvailable: ramPreviewOk
                 );
 
-                // Barramento, Metrics e Config podem ser referenciados diretamente (são POCOs)
-                var barramento = Barramento;
-                var metrics = Metrics;
-                var config = Config;
+                // DMA snapshot (usar o snapshot fornecido pela DmaState)
+                var dmaSnapshot = Dma.GetSnapshot();
 
                 return new SimulationSnapshot(
                     CicloAtual: CicloAtual,
@@ -133,9 +128,8 @@ namespace ProjetoSimuladorPC.Utilidades
                     Cpu: cpu,
                     Cache: cache,
                     Ram: ram,
-                    Barramento: barramento,
-                    Metrics: metrics,
-                    Config: config
+                    Dma: dmaSnapshot,
+                    Config: Config
                 );
             }
         }
@@ -149,8 +143,7 @@ namespace ProjetoSimuladorPC.Utilidades
         CpuSnapshot Cpu,
         CacheSnapshot Cache,
         RamSnapshot Ram,
-        BarramentoState Barramento,
-        MetricsState Metrics,
+        DmaSnapshot Dma,
         Configuracoes Config
     );
 
