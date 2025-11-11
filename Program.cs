@@ -14,6 +14,14 @@ builder.Services.AddRazorComponents()
 // Registrar SimulationState como singleton para injeção em componentes e controllers
 builder.Services.AddSingleton<SimulationState>();
 
+// registrar SimulationEngine — instancia a partir do SimulationState já registrado
+builder.Services.AddSingleton<SimulationEngine>(sp =>
+{
+    var sim = sp.GetRequiredService<SimulationState>();
+    var engine = new SimulationEngine(sim);
+    return engine;
+});
+
 // Habilitar controllers para endpoints REST usados pela UI
 builder.Services.AddControllers();
 
