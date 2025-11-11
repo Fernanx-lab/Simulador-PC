@@ -23,8 +23,28 @@
     <section class="status-bar">
         <div>Ciclo: <strong>@snapshot?.CicloAtual</strong></div>
         <div>Timestamp: <strong>@(snapshot?.TimestampUtc.ToLocalTime().ToString("HH:mm:ss.fff") ?? "-")</strong></div>
-        <div>Clock: <strong>@Simulation.Config.ClockHz</strong> Hz</div>
+        <div>Clock: <strong>@config?.ClockHz</strong> Hz</div>
     </section>
+
+    <aside style="margin:12px 0; padding:10px; background:rgba(255,255,255,0.02); border-radius:6px;">
+        <h3>Configurações Atuais</h3>
+        @if (config is not null)
+        {
+            <div style="font-family:ui-monospace,Consolas,monospace; font-size:0.95rem;">
+                <div><strong>Clock:</strong> @config.ClockHz Hz</div>
+                <div><strong>Cache L1:</strong> @config.L1Size · assoc.@config.L1Assoc · linha @config.L1LineSize</div>
+                <div><strong>Write Policy:</strong> @config.L1WritePolicy @if(config.L1WriteAlloc){<span>(Write-Alloc)</span>}</div>
+                <div><strong>Bus:</strong> largura @config.BusWidthBytes bytes · wait @config.BusWaitStates · @config.BusArbitration</div>
+                <div><strong>Timer Period:</strong> @config.TimerPeriodCycles ciclos</div>
+                <div><strong>DMA Burst Len:</strong> @config.DmaBurstLen</div>
+                <div><strong>MMIO Bases:</strong> Timer=0x@config.TimerBase:X8 Console=0x@config.ConsoleBase:X8 DMA=0x@config.DmaBase:X8 PIC=0x@config.PicBase:X8</div>
+            </div>
+        }
+        else
+        {
+            <div>(configuração não disponível)</div>
+        }
+    </aside>
 
     <main class="grid">
         <article class="card cpu">
@@ -145,6 +165,7 @@
 
 @code {
     SimulationSnapshot? snapshot;
+    Configuracoes? config;
     int AutoMs = 500;
     System.Threading.Timer? timer;
 
@@ -152,15 +173,19 @@
     {
         Simulation.StateChanged += OnSimulationChanged;
         await RefreshAsync();
+        // inicializa config local a partir do serviço
+        config = Simulation.Config ?? new Configuracoes();
         if (AutoAdvance) StartTimer();
     }
 
     void OnSimulationChanged(object? s, EventArgs e)
     {
-        // atualiza snapshot reativamente
+        // atualiza snapshot e config reativamente
         InvokeAsync(async () =>
         {
             await RefreshAsync();
+            // sincroniza a cópia local de config
+            config = Simulation.Config ?? new Configuracoes();
             StateHasChanged();
         });
     }
@@ -170,11 +195,13 @@
         try
         {
             snapshot = await Http.GetFromJsonAsync<SimulationSnapshot>($"api/simulation/snapshot?ramPreviewAddress=0&ramPreviewLength=32");
+            // se o snapshot veio do servidor, mantenha config também pelo HTTP (opcional)
         }
         catch
         {
             // fallback local: ler diretamente do serviço caso o HTTP falhe
             snapshot = Simulation.GetSnapshot(0, 32);
+            config = Simulation.Config ?? new Configuracoes();
         }
     }
 
@@ -182,15 +209,12 @@
     {
         try
         {
-            // chama endpoint que avança o clock; o SimulationState do servidor notificará os componentes via event
             var response = await Http.PostAsync($"api/simulation/advance?delta=1", null);
             response.EnsureSuccessStatusCode();
-            // opcional: atualizar imediatamente
             await RefreshAsync();
         }
         catch
         {
-            // fallback local
             Simulation.AdvanceCycle();
             await RefreshAsync();
         }

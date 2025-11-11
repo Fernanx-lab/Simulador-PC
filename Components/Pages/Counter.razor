@@ -1,6 +1,9 @@
 ﻿@page "/counter"
 @rendermode InteractiveServer
 
+@using ProjetoSimuladorPC.Utilidades
+@inject SimulationState Simulation
+
 <h2>⚙️ Configurações do Hardware</h2>
 
 <form id="configForm">
@@ -102,6 +105,36 @@
 
     private void SalvarConfiguracoes()
     {
-        // Lógica para salvar as configurações
+        // Atualiza a instância singleton SimulationState.Config e notifica a UI
+        try
+        {
+            // Clone ou use a instância existente para evitar sobrescrever referências indesejadas
+            var cfg = Simulation.Config?.Clone() ?? new Configuracoes();
+
+            cfg.ClockHz = ClockHz;
+            cfg.L1Type = L1Type;
+            cfg.L1Size = L1Size;
+            cfg.L1Assoc = L1Assoc;
+            cfg.L1LineSize = L1LineSize;
+            cfg.L1HitCycles = L1HitCycles;
+            cfg.L1MissCycles = L1MissCycles;
+            cfg.L1WritePolicy = L1WritePolicy;
+            cfg.L1WriteAlloc = L1WriteAlloc;
+            cfg.BusWidthBytes = BusWidthBytes;
+            cfg.BusWaitStates = BusWaitStates;
+            cfg.BusArbitration = BusArbitration;
+            cfg.TimerPeriodCycles = TimerPeriodCycles;
+            cfg.DmaBurstLen = DmaBurstLen;
+
+            // Valida se quiser
+            try { cfg.Validate(); } catch { /* ignore ou mostrar erro ao usuário */ }
+
+            Simulation.Config = cfg;
+            Simulation.NotifyStateChanged();
+        }
+        catch
+        {
+            // log ou notificação simples
+        }
     }
 }
