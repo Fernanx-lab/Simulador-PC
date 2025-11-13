@@ -1,10 +1,12 @@
 ﻿@page "/"
 @rendermode InteractiveServer
 @using System.Net.Http.Json
+@using System.Text.Json
 @using ProjetoSimuladorPC.Utilidades
 @inject SimulationState Simulation
 @inject HttpClient Http
 @inject SimulationEngine Engine
+@inject IJSRuntime JS
 @implements IDisposable
 
 <PageTitle>Mini Computador — Painel</PageTitle>
@@ -122,6 +124,14 @@
 
                 <div class="dma-msg">@snapshot.Dma.Mensagem</div>
             }
+
+            <div style="margin-top:10px;">
+                <label>Origem: <input type="number" class="small" @bind="dmaOrigem" /></label>
+                <label style="margin-left:8px">Destino: <input type="number" class="small" @bind="dmaDestino" /></label>
+                <label style="margin-left:8px">Tamanho: <input type="number" class="small" @bind="dmaTamanho" min="1" /></label>
+                <label style="margin-left:8px">Delay ms: <input type="number" class="small" @bind="dmaDelayMs" min="0" /></label>
+                <button class="btn" @onclick="StartDmaClicked" disabled="@isDmaRunning">Iniciar DMA</button>
+            </div>
         </article>
     </main>
 
@@ -173,11 +183,52 @@
 @code {
     SimulationSnapshot? snapshot;
     Configuracoes? config;
-    int AutoMs = 500;
-    System.Threading.Timer? timer;
 
     string? LastError;
     bool isLoading = false;
+
+    // DMA UI state
+    int dmaOrigem = 0;
+    int dmaDestino = 0;
+    int dmaTamanho = 16;
+    int dmaDelayMs = 10;
+    bool isDmaRunning = false;
+
+    // Auto properties: AutoAdvance controla o Engine.StartAuto/StopAuto.
+    private bool _autoAdvance;
+    private bool AutoAdvance
+    {
+        get => _autoAdvance;
+        set
+        {
+            _autoAdvance = value;
+            try
+            {
+                if (_autoAdvance) Engine?.StartAuto(Math.Max(1, AutoMs));
+                else Engine?.StopAuto();
+            }
+            catch (Exception ex)
+            {
+                LastError = $"Erro ao alternar Auto: {ex.Message}";
+            }
+        }
+    }
+
+    private int _autoMs = 500;
+    private int AutoMs
+    {
+        get => _autoMs;
+        set
+        {
+            _autoMs = value;
+            // se Auto estiver ativo, reinicia com novo intervalo
+            if (AutoAdvance)
+            {
+                try { Engine?.StartAuto(Math.Max(1, _autoMs)); }
+                catch (Exception ex) { LastError = $"Erro ao atualizar intervalo Auto: {ex.Message}"; }
+            }
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -185,19 +236,50 @@
         await RefreshAsync();
         // inicializa config local a partir do serviço
         config = Simulation.Config ?? new Configuracoes();
-        if (AutoAdvance) StartTimer();
+        if (AutoAdvance) Engine?.StartAuto(Math.Max(1, AutoMs));
     }
 
     void OnSimulationChanged(object? s, EventArgs e)
     {
-        // atualiza snapshot e config reativamente
-        InvokeAsync(async () =>
+        // atualiza snapshot e config reativamente — prioriza snapshot local para evitar round-trip HTTP
+        InvokeAsync(() =>
         {
-            await RefreshAsync();
-            // sincroniza a cópia local de config
-            config = Simulation.Config ?? new Configuracoes();
-            StateHasChanged();
+            try
+            {
+                // leitura local e rápida do snapshot (garante que mudanças em RAM/DMA apareçam imediatamente)
+                snapshot = Simulation.GetSnapshot(0, 32);
+                config = Simulation.Config ?? new Configuracoes();
+                StateHasChanged();
+            }
+            catch
+            {
+                // fallback para a versão assíncrona/HTTP caso algo falhe
+                _ = RefreshAsync();
+            }
         });
+    }
+
+    async Task StartDmaClicked()
+    {
+        LastError = null;
+        try
+        {
+            isDmaRunning = true;
+            StateHasChanged();
+            // chama o Engine que por sua vez invoca DMA.ExecutarTransferenciaAsync(...)
+            await Engine.StartDmaAsync(dmaOrigem, dmaDestino, dmaTamanho, dmaDelayMs);
+            // força uma atualização quando a transferência terminar (os eventos já atualizam durante a transferência)
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            LastError = $"Falha ao iniciar DMA: {ex.Message}";
+        }
+        finally
+        {
+            isDmaRunning = false;
+            StateHasChanged();
+        }
     }
 
     async Task RefreshAsync()
@@ -208,6 +290,7 @@
         {
             snapshot = await Http.GetFromJsonAsync<SimulationSnapshot>($"api/simulation/snapshot?ramPreviewAddress=0&ramPreviewLength=32");
             // se o snapshot veio do servidor, mantenha config também pelo HTTP (opcional)
+            if (snapshot is not null) await LogSnapshotToConsole();
         }
         catch (Exception ex)
         {
@@ -216,6 +299,7 @@
             {
                 snapshot = Simulation.GetSnapshot(0, 32);
                 config = Simulation.Config ?? new Configuracoes();
+                if (snapshot is not null) await LogSnapshotToConsole();
             }
             catch (Exception inner)
             {
@@ -245,8 +329,6 @@
         }
         catch (Exception ex)
         {
-            // Antes: Simulation.AdvanceCycle() fazia só incremento do contador.
-            // Agora usamos o motor (Engine) para executar realmente um ciclo (CPU, Cache, DMA, RAM).
             try
             {
                 Engine?.AdvanceOneCycle();
@@ -268,19 +350,35 @@
         }
     }
 
-    void StartTimer()
+    // --- novo: loga snapshot e partes no console do navegador via IJSRuntime ---
+    async Task LogSnapshotToConsole()
     {
-        timer?.Dispose();
-        timer = new System.Threading.Timer(async _ =>
-        {
-            await InvokeAsync(async () => await AdvanceCycleAsync());
-        }, null, 0, Math.Max(50, AutoMs));
-    }
+        if (snapshot is null) return;
 
-    void StopTimer()
-    {
-        timer?.Dispose();
-        timer = null;
+        try
+        {
+            var opts = new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+            };
+
+            // log principal (string grande): evita problemas com objetos circulares serializando snapshot parcial
+            var json = JsonSerializer.Serialize(snapshot, opts);
+            await JS.InvokeVoidAsync("console.log", "SimulationSnapshot:", json);
+
+            // logs separados para facilitar leitura
+            await JS.InvokeVoidAsync("console.log", "CPU:", JsonSerializer.Serialize(snapshot.Cpu, opts));
+            await JS.InvokeVoidAsync("console.log", "Cache:", JsonSerializer.Serialize(snapshot.Cache, opts));
+            await JS.InvokeVoidAsync("console.log", "DMA:", JsonSerializer.Serialize(snapshot.Dma, opts));
+            await JS.InvokeVoidAsync("console.log", "RAM Preview:", JsonSerializer.Serialize(snapshot.Ram, opts));
+        }
+        catch (Exception ex)
+        {
+            // erros de serialização aparecem no console do navegador
+            await JS.InvokeVoidAsync("console.error", "Erro ao serializar snapshot:", ex.Message);
+        }
     }
 
     IEnumerable<string> GetRamLines(byte[] data, int baseAddr, int cols)
@@ -303,18 +401,6 @@
     public void Dispose()
     {
         Simulation.StateChanged -= OnSimulationChanged;
-        timer?.Dispose();
-    }
-
-    // bind watcher for checkbox
-    private bool _autoAdvance;
-    private bool AutoAdvance
-    {
-        get => _autoAdvance;
-        set
-        {
-            _autoAdvance = value;
-            if (_autoAdvance) StartTimer(); else StopTimer();
-        }
+        try { Engine?.StopAuto(); } catch { }
     }
 }

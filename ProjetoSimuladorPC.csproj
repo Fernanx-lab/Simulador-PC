@@ -7,10 +7,22 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Folder Include="Barramento\" />
-    <Folder Include="Interruptor\" />
-    <Folder Include="MMIO\" />
-    <Folder Include="timer\" />
+    <Compile Remove="Barramento\**" />
+    <Compile Remove="Interruptor\**" />
+    <Compile Remove="MMIO\**" />
+    <Compile Remove="timer\**" />
+    <Content Remove="Barramento\**" />
+    <Content Remove="Interruptor\**" />
+    <Content Remove="MMIO\**" />
+    <Content Remove="timer\**" />
+    <EmbeddedResource Remove="Barramento\**" />
+    <EmbeddedResource Remove="Interruptor\**" />
+    <EmbeddedResource Remove="MMIO\**" />
+    <EmbeddedResource Remove="timer\**" />
+    <None Remove="Barramento\**" />
+    <None Remove="Interruptor\**" />
+    <None Remove="MMIO\**" />
+    <None Remove="timer\**" />
   </ItemGroup>
 
 </Project>

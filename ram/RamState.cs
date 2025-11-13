@@ -1,4 +1,5 @@
 ﻿using System;
+using ProjetoSimuladorPC.Cache;
 
 namespace ProjetoSimuladorPC.RAM
 {
@@ -11,6 +12,9 @@ namespace ProjetoSimuladorPC.RAM
     {
         private readonly Ram _ram;
         private readonly object _sync = new();
+
+        // cache opcional (pode ser anexada em tempo de execução)
+        private ProjetoSimuladorPC.Cache.Cache? _cache;
 
         public event EventHandler<MemoryChangedEventArgs>? MemoryChanged;
 
@@ -25,12 +29,23 @@ namespace ProjetoSimuladorPC.RAM
         }
 
         /// <summary>
+        /// Anexa uma instância de cache para que leituras/escritas atualizem estatísticas.
+        /// </summary>
+        public void AttachCache(ProjetoSimuladorPC.Cache.Cache cache)
+        {
+            _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+        }
+
+        /// <summary>
         /// Lê um byte no endereço especificado.
         /// </summary>
         public byte Ler(int endereco)
         {
             lock (_sync)
             {
+                // registra acesso na cache (apenas estatísticas aqui)
+                try { _cache?.Access((uint)endereco, false); } catch { }
+
                 return _ram.Ler(endereco);
             }
         }
@@ -42,6 +57,9 @@ namespace ProjetoSimuladorPC.RAM
         {
             lock (_sync)
             {
+                // registra um acesso de bloco como um único acesso (ajuste se desejar granularidade)
+                try { _cache?.Access((uint)endereco, false); } catch { }
+
                 return _ram.Ler(endereco, comprimento);
             }
         }
@@ -70,6 +88,9 @@ namespace ProjetoSimuladorPC.RAM
         {
             lock (_sync)
             {
+                // registra escrita na cache
+                try { _cache?.Access((uint)endereco, true); } catch { }
+
                 _ram.Escrever(endereco, valor);
                 OnMemoryChanged(endereco, new[] { valor });
             }
@@ -84,6 +105,9 @@ namespace ProjetoSimuladorPC.RAM
 
             lock (_sync)
             {
+                // registra escrita de bloco como um único acesso (ajuste se desejar granularidade)
+                try { _cache?.Access((uint)endereco, true); } catch { }
+
                 _ram.Escrever(endereco, dados);
                 OnMemoryChanged(endereco, dados);
             }

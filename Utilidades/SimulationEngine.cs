@@ -27,6 +27,10 @@ public class SimulationEngine : IDisposable
     readonly DmaState dmaState;
     System.Threading.Timer? autoTimer;
 
+    // Handlers nomeados para subscribe/unsubscribe corretos
+    readonly EventHandler<ProjetoSimuladorPC.RAM.MemoryChangedEventArgs> ramMemoryChangedHandler;
+    readonly EventHandler dmaStateChangedHandler;
+
     public SimulationEngine(SimulationState simulationState)
     {
         simState = simulationState ?? throw new ArgumentNullException(nameof(simulationState));
@@ -41,7 +45,8 @@ public class SimulationEngine : IDisposable
 
         // CPU: passa a CpuState de simState para que a UI veja as mudanças diretamente
         var cpuState = simState.Cpu;
-        cpuSimulator = new CpuSimulator(ram, pic, metrics);
+        // Modificado: passa cpuState compartilhada ao criar o CpuSimulator
+        cpuSimulator = new CpuSimulator(ram, pic, metrics, cpuState);
 
         // MMIO e DMA: mmio com faixa baseada no Config (fallback)
         uint dmaBase = simState.Config?.DmaBase ?? 0x1000_0200;
@@ -57,9 +62,16 @@ public class SimulationEngine : IDisposable
         // substituição fixa LRU para simplificação
         cacheSim = new Cache.Cache(cacheSizeBytes, blockSize, assoc, ReplacementPolicy.LRU, wp, cacheState);
 
-        // Subscrições para propagar mudanças à UI
-        ram.MemoryChanged += (_, __) => simState.NotifyStateChanged();
-        dmaState.StateChanged += (_, __) => simState.NotifyStateChanged();
+        // ANEXA a cache à RAM para que acessos reais atualizem estatísticas
+        ram.AttachCache(cacheSim);
+
+        // cria handlers nomeados que notificam o SimulationState
+        ramMemoryChangedHandler = (_, __) => simState.NotifyStateChanged();
+        dmaStateChangedHandler = (_, __) => simState.NotifyStateChanged();
+
+        // Subscrições para propagar mudanças à UI (usando handlers nomeados)
+        ram.MemoryChanged += ramMemoryChangedHandler;
+        dmaState.StateChanged += dmaStateChangedHandler;
         // cacheSim atualiza a fachada por si só; apenas garanta notificação quando engine faz avanços
 
         // Exponha as instâncias (garante que SimulationState referencia as fachadas corretas)
@@ -133,8 +145,8 @@ public class SimulationEngine : IDisposable
     public void Dispose()
     {
         StopAuto();
-        // unsubscribes (safety)
-        try { ram.MemoryChanged -= (_, __) => simState.NotifyStateChanged(); } catch { }
-        try { dmaState.StateChanged -= (_, __) => simState.NotifyStateChanged(); } catch { }
+        // unsubscribes corretos usando os mesmos handlers registrados
+        try { ram.MemoryChanged -= ramMemoryChangedHandler; } catch { }
+        try { dmaState.StateChanged -= dmaStateChangedHandler; } catch { }
     }
 }

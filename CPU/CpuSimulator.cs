@@ -25,12 +25,15 @@ namespace ProjetoSimuladorPC.Cpu
 
         private ulong contadorCiclos = 0;
 
-        public CpuSimulator(RamState ram, IPicController controladorPic, Metrics metricas)
+        // Modificado: aceita um CpuState externo para que a UI (SimulationState.Cpu)
+        // e o motor compartilhem a mesma instância de estado da CPU.
+        public CpuSimulator(RamState ram, IPicController controladorPic, Metrics metricas, CpuState? sharedEstado = null)
         {
             this.ram = ram ?? throw new ArgumentNullException(nameof(ram));
             this.controladorPic = controladorPic ?? throw new ArgumentNullException(nameof(controladorPic));
             this.metricas = metricas ?? throw new ArgumentNullException(nameof(metricas));
-            estado = new CpuState();
+            // usa a instância compartilhada se fornecida (permite que SimulationState veja mudanças)
+            estado = sharedEstado ?? new CpuState();
             executor = new InstructionExecutor(ram, estado, this.metricas);
             tratadorIrq = new CpuInterruptHandler(controladorPic, estado, this.metricas);
 
